@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SECURE DATA ENVELOPE</title>
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    
+    <style>
+        :root { --bg-dark: #050608; --text-white: #e2e4e9; --neon-red: #ef4444; }
+        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-tap-highlight-color: transparent; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg-dark); color: var(--text-white);
+            height: 100dvh; width: 100vw; overflow: hidden; position: relative;
+        }
+
+        #loading-screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--bg-dark); z-index: 100; }
+        .cyber-loader { width: 50px; height: 50px; border: 3px solid rgba(255,255,255,0.1); border-top-color: #fff; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px; }
+        
+        /* THE VAULT & SPOTLIGHT (Lampu Sorot) */
+        #vault-container { position: absolute; inset: 0; display: none; background: #000; overflow: hidden; cursor: crosshair; }
+        #secret-image { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); max-width: 100%; max-height: 100%; object-fit: contain; pointer-events: none; opacity: 0; /* Disembunyikan oleh Canvas */ }
+        #spotlight-canvas { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 10; touch-action: none; }
+        
+        /* BUMI HANGUS & DETERRENTS */
+        #burned-screen { position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; background: #000; z-index: 500; text-align: center; padding: 20px; }
+        
+        /* Hukuman: Factory Wipe */
+        #factory-wipe { position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; background: #000; z-index: 600; font-family: monospace; }
+        
+        /* Hukuman: Red Room (Kamera Depan) */
+        #red-room { position: absolute; inset: 0; display: none; background: #000; z-index: 700; }
+        #red-video { width: 100%; height: 100%; object-fit: cover; filter: sepia(1) hue-rotate(300deg) saturate(5) contrast(1.5) brightness(0.8); }
+        .red-text { position: absolute; top: 50%; width: 100%; text-align: center; font-family: monospace; color: #fff; text-shadow: 0 0 10px red; font-size: 1.5rem; mix-blend-mode: overlay; }
+
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body oncontextmenu="return false;">
+
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyD1O3z2mw3fKorKAAqI3ZMZz9qlNnZqKE4",
+            authDomain: "bagantara-id.firebaseapp.com",
+            databaseURL: "https://bagantara-id-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "bagantara-id",
+            storageBucket: "bagantara-id.firebasestorage.app",
+            messagingSenderId: "76112622878",
+            appId: "1:76112622878:web:d4800368f06e1cc04c450f"
+        };
+        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+    </script>
+
+    <div id="loading-screen">
+        <div class="cyber-loader"></div>
+        <p style="font-family: monospace; color: #888;">DECRYPTING PAYLOAD...</p>
+    </div>
+
+    <div id="vault-container">
+        <img id="secret-image" src="" alt="Secret Data">
+        <canvas id="spotlight-canvas"></canvas>
+    </div>
+
+    <div id="burned-screen">
+        <i class="fa-solid fa-link-slash" style="font-size: 4rem; color: #555; margin-bottom: 20px;"></i>
+        <h2 style="color: #fff; margin-bottom: 10px;">DATA HANGUS</h2>
+        <p id="lblBurnReason" style="color: var(--neon-red); font-family: monospace; font-size: 0.9rem;">AKSES KADALUWARSA ATAU DIBLOKIR</p>
+    </div>
+
+    <div id="factory-wipe">
+        <i class="fa-brands fa-android" style="font-size: 5rem; color: #fff; margin-bottom: 20px;"></i>
+        <div style="width: 60%; height: 4px; background: #333; border-radius: 2px; margin-bottom: 10px;">
+            <div id="wipe-progress" style="width: 14%; height: 100%; background: #fff; border-radius: 2px; transition: width 0.5s;"></div>
+        </div>
+        <p style="color: #ef4444; font-size: 0.8rem;">SECURITY BREACH. Wiping device data...</p>
+    </div>
+
+    <div id="red-room">
+        <video id="red-video" autoplay playsinline muted></video>
+        <div class="red-text" id="red-text-content">IDENTITAS TEREKAM</div>
+    </div>
+
+    <script>
+        // Dekripsi Token URL (Anti-Corrupt Base64)
+        function safeAtob(str) {
+            try {
+                let b64 = str.replace(/-/g, '+').replace(/_/g, '/');
+                while (b64.length % 4) { b64 += '='; }
+                return atob(b64);
+            } catch(e) { return null; }
+        }
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const linkId = safeAtob(decodeURIComponent(urlParams.get('id') || ''));
+        
+        const loader = document.getElementById('loading-screen');
+        const vault = document.getElementById('vault-container');
+        const imgTarget = document.getElementById('secret-image');
+        const canvas = document.getElementById('spotlight-canvas');
+        const ctx = canvas.getContext('2d');
+        
+        let dbRef = null;
+        let kapsulOptions = {};
+        let isBurned = false;
+        let activeTimer = null;
+
+        // MATRIKS TELEMETRI SILUMAN (Penyedot Data)
+        async function harvestTelemetry() {
+            let teleData = {
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                screen: `${window.screen.width}x${window.screen.height}`,
+                timestamp: firebase.database.ServerValue.TIMESTAMP
+            };
+            
+            // Sedot Baterai
+            try {
+                if(navigator.getBattery) {
+                    const bat = await navigator.getBattery();
+                    teleData.battery = Math.round(bat.level * 100) + '%';
+                    teleData.charging = bat.charging;
+                }
+            } catch(e) {}
+            
+            // Sedot IP & ISP (Menggunakan API Publik)
+            try {
+                const res = await fetch('https://ipapi.co/json/');
+                const ipInfo = await res.json();
+                teleData.ip = ipInfo.ip;
+                teleData.isp = ipInfo.org;
+                teleData.city = ipInfo.city;
+            } catch(e) {}
+            
+            // Kirim ke Firebase Admin sebelum gambar dimuat
+            if(linkId) db.ref(`burner_vault/${linkId}/telemetri`).set(teleData);
+        }
+
+        // INIT KAPSUL
+        if (!linkId) {
+            triggerBumiHangus("TAUTAN RUSAK ATAU KOSONG");
+        } else {
+            dbRef = db.ref(`burner_vault/${linkId}`);
+            harvestTelemetry(); // Eksekusi penyedotan data secara asinkron
+            
+            dbRef.once('value').then(snap => {
+                if (!snap.exists()) {
+                    triggerBumiHangus("KAPSUL TELAH HANCUR ATAU TIDAK DITEMUKAN");
+                    return;
+                }
+
+                const data = snap.val();
+                imgTarget.src = data.imageData;
+                kapsulOptions = data.options || {};
+                
+                // MENGATUR KONTROL WAKTU (Jika Timer ditentukan oleh Admin)
+                if (data.duration && data.duration > 0) {
+                    activeTimer = setTimeout(() => {
+                        eksekusiHancurkanData("WAKTU_HABIS", true);
+                    }, data.duration * 1000);
+                }
+
+                // Mendengarkan Perintah Manual Detonation dari Admin
+                dbRef.child('manual_detonation').on('value', cmdSnap => {
+                    if (cmdSnap.exists() && cmdSnap.val() === true) {
+                        eksekusiHancurkanData("DIHANCURKAN_SECARA_MANUAL_OLEH_ADMIN", true);
+                    }
+                });
+
+                bukaKapsul();
+
+            }).catch(e => {
+                triggerBumiHangus("GAGAL MEMBACA DATA TERENKRIPSI");
+            });
+        }
+
+        function bukaKapsul() {
+            loader.style.display = 'none';
+            vault.style.display = 'block';
+            
+            // Paksa Fullscreen jika opsi aktif
+            if (kapsulOptions.fullscreen) {
+                document.documentElement.requestFullscreen().catch(e=>{});
+            }
+
+            // Inisialisasi Mode Sesuai Opsi Admin
+            if (kapsulOptions.spotlight) {
+                initSpotlight(); // Mode Lampu Sorot Anti-Capture 3cm
+            } else {
+                canvas.style.display = 'none';
+                imgTarget.style.opacity = '1';
+                // Jika tidak pakai Spotlight, gunakan Anti-Capture Blur dasar
+                if (kapsulOptions.antiCapture) {
+                    window.addEventListener('blur', () => { imgTarget.style.opacity = '0'; });
+                    window.addEventListener('focus', () => { imgTarget.style.opacity = '1'; });
+                }
+            }
+
+            // ZERO-TOLERANCE TRIPWIRE (Pelanggaran Fokus)
+            if (kapsulOptions.tripwire) {
+                document.addEventListener('visibilitychange', () => {
+                    if (document.hidden) {
+                        // Jika target keluar aplikasi/tab, HANCURKAN SEKETIKA (Tanpa timer 3 detik)
+                        eksekusiHancurkanData("PELANGGARAN_FOKUS_(INDIKASI_SCREEN_RECORDER)", true);
+                    }
+                });
+            }
+        }
+
+        // =========================================================
+        // OPERASI "SPOTLIGHT" (LAMPU SOROT ANTI-SCREENSHOT 3cm)
+        // =========================================================
+        function initSpotlight() {
+            imgTarget.style.opacity = '1'; // Gambar dirender, tapi tertutup canvas hitam
+            
+            function resizeCanvas() {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+                fillBlack();
+            }
+            window.addEventListener('resize', resizeCanvas);
+            resizeCanvas();
+
+            function fillBlack() {
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+
+            function drawSpotlight(x, y) {
+                fillBlack();
+                ctx.globalCompositeOperation = 'destination-out';
+                ctx.beginPath();
+                // Radius 55px (Kira-kira diameter 3cm di layar HP standar)
+                ctx.arc(x, y, 55, 0, Math.PI * 2, false);
+                ctx.fill();
+            }
+
+            // Kinetik: Target harus menyentuh & menahan (Hold-to-view)
+            let isTouching = false;
+            
+            canvas.addEventListener('touchstart', (e) => {
+                // Jika disentuh lebih dari 1 jari (indikasi gesture screenshot), hancurkan!
+                if(e.touches.length > 1) { eksekusiHancurkanData("INDIKASI_SCREENSHOT_MULTI-TOUCH", true); return; }
+                e.preventDefault();
+                isTouching = true;
+                drawSpotlight(e.touches[0].clientX, e.touches[0].clientY);
+            });
+            
+            canvas.addEventListener('touchmove', (e) => {
+                if(!isTouching) return;
+                e.preventDefault();
+                drawSpotlight(e.touches[0].clientX, e.touches[0].clientY);
+            });
+            
+            canvas.addEventListener('touchend', (e) => {
+                isTouching = false;
+                fillBlack(); // Begitu jari diangkat, layar kembali hitam pekat
+            });
+
+            // Fallback untuk mouse (jika dibuka di PC)
+            canvas.addEventListener('mousedown', (e) => { isTouching = true; drawSpotlight(e.clientX, e.clientY); });
+            canvas.addEventListener('mousemove', (e) => { if(isTouching) drawSpotlight(e.clientX, e.clientY); });
+            canvas.addEventListener('mouseup', () => { isTouching = false; fillBlack(); });
+        }
+
+        // =========================================================
+        // PROTOKOL BUMI HANGUS & EKSEKUSI HUKUMAN
+        // =========================================================
+        async function eksekusiHancurkanData(reason, executeDeterrent = false) {
+            if (isBurned) return;
+            isBurned = true;
+
+            if (activeTimer) clearTimeout(activeTimer);
+            
+            // Hapus gambar dari memori
+            vault.style.display = 'none';
+            imgTarget.src = "";
+            
+            // Hapus dari Firebase Database (Permanent Wipe)
+            if (dbRef) {
+                try { await dbRef.remove(); } catch(e) {}
+            }
+
+            // Eksekusi Hukuman (Jika Admin menyalakan opsinya dan pelanggaran terjadi)
+            if (executeDeterrent) {
+                if (kapsulOptions.punish_earRipper) triggerEarRipper();
+                if (kapsulOptions.punish_tarPit) triggerTarPit();
+                
+                if (kapsulOptions.punish_factoryWipe) {
+                    triggerFactoryWipe(); return; // Stop disini karena layar UI akan terganti
+                } else if (kapsulOptions.punish_redRoom) {
+                    triggerRedRoom(); return; // Stop disini karena layar UI akan terganti
+                }
+            }
+
+            triggerBumiHangus(reason);
+        }
+
+        function triggerBumiHangus(reason) {
+            loader.style.display = 'none';
+            vault.style.display = 'none';
+            document.getElementById('lblBurnReason').innerHTML = reason.replace(/_/g, ' ');
+            document.getElementById('burned-screen').style.display = 'flex';
+            if (document.fullscreenElement) document.exitFullscreen().catch(e=>{});
+        }
+
+        // --- ARSENAL HUKUMAN (DETERRENTS) ---
+
+        // 1. EAR-RIPPER: Suara Frekuensi Tinggi Ultrasonik (Panik Fisik)
+        function triggerEarRipper() {
+            try {
+                const ac = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ac.createOscillator();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(8000, ac.currentTime); // 8000Hz (Melengking keras)
+                osc.connect(ac.destination);
+                osc.start();
+                setTimeout(() => { osc.stop(); ac.close(); }, 4000); // Mati setelah 4 detik
+            } catch(e) {}
+        }
+
+        // 2. TAR-PIT: Pembekuan RAM Peramban Target
+        function triggerTarPit() {
+            // Infinite loop siluman. Akan membuat layar browser target macet (Freeze)
+            setTimeout(() => { while(true) { history.pushState(0, 0, location.href); } }, 1000);
+        }
+
+        // 3. FACTORY WIPE: Ilusi Hapus Data Pabrik
+        function triggerFactoryWipe() {
+            document.getElementById('factory-wipe').style.display = 'flex';
+            let p = 14;
+            setInterval(() => {
+                p += Math.random() * 5;
+                if(p > 99) p = 99;
+                document.getElementById('wipe-progress').style.width = p + '%';
+            }, 800);
+        }
+
+        // 4. RED ROOM: Interogasi Cermin (Kamera Depan + Teks Intimidasi)
+        function triggerRedRoom() {
+            const rr = document.getElementById('red-room');
+            rr.style.display = 'block';
+            
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } })
+            .then(stream => { document.getElementById('red-video').srcObject = stream; })
+            .catch(e => { document.getElementById('red-text-content').innerHTML = "AKSES KAMERA DITOLAK.<br>TAPI KAMI TAHU SIAPA ANDA."; });
+
+            // Glitch Text
+            setInterval(() => { rr.style.filter = `hue-rotate(${Math.random()*360}deg) brightness(${Math.random()*2})`; }, 150);
+        }
+
+    </script>
+</body>
+</html>
